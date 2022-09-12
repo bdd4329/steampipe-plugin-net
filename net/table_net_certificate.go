@@ -16,6 +16,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -53,6 +54,7 @@ func tableNetCertificate(ctx context.Context) *plugin.Table {
 			{Name: "transparent", Type: proto.ColumnType_BOOL, Hydrate: getCertificateTransparencyLogs, Transform: transform.FromValue(), Description: "True if the certificate is visible in certificate transparency logs."},
 			{Name: "is_ca", Type: proto.ColumnType_BOOL, Transform: transform.FromField("IsCertificateAuthority"), Description: "True if the certificate represents a certificate authority."},
 			// Other columns
+			{Name: "port", Type: proto.ColumnType_INT, Description: "Port number for TLS connection."},
 			{Name: "serial_number", Type: proto.ColumnType_STRING, Description: "Serial number of the certificate."},
 			{Name: "subject", Type: proto.ColumnType_STRING, Description: "Subject of the certificate."},
 			{Name: "public_key_algorithm", Type: proto.ColumnType_STRING, Description: "Public key algorithm used by the certificate."},
@@ -101,6 +103,7 @@ type tableNetCertificateRow struct {
 	NotBefore              time.Time                `json:"not_before,omitempty"`
 	Organization           string                   `json:"organization,omitempty"`
 	OU                     []string                 `json:"ou,omitempty"`
+	Port                   int                      `json:"port,omitempty"`
 	PublicKeyAlgorithm     string                   `json:"public_key_algorithm,omitempty"`
 	PublicKeyLength        int                      `json:"public_key_length,omitempty"`
 	SignatureAlgorithm     string                   `json:"signature_algorithm,omitempty"`
@@ -136,6 +139,10 @@ func tableNetCertificateList(ctx context.Context, d *plugin.QueryData, h *plugin
 		return nil, nil
 	}
 	dn := d.KeyColumnQualString("domain")
+	port := d.KeyColumnQualString("port")
+	if port == "" {
+		port = "443"
+	}
 
 	// Create TLS config
 	cfg := tls.Config{
@@ -144,7 +151,7 @@ func tableNetCertificateList(ctx context.Context, d *plugin.QueryData, h *plugin
 	}
 
 	tcpConnectionCreated := false
-	addr := net.JoinHostPort(dn, "443")
+	addr := net.JoinHostPort(dn, port)
 	dialer := &net.Dialer{
 		Timeout: time.Duration(3) * time.Second, // short, certificates should be fast
 		Control: func(network, address string, c syscall.RawConn) error { // This gets called once the TCP connection gets opened before handshake
@@ -220,6 +227,7 @@ func tableNetCertificateList(ctx context.Context, d *plugin.QueryData, h *plugin
 		c.IssuingCertificateURL = i.IssuingCertificateURL
 		c.NotAfter = i.NotAfter
 		c.NotBefore = i.NotBefore
+		c.Port, err = strconv.Atoi(port)
 		c.PublicKeyAlgorithm = i.PublicKeyAlgorithm.String()
 		// Represent the serial number as 32 hex characters, with leading zeros.
 		// This appears to be consistent with the Qualys SSL display.
